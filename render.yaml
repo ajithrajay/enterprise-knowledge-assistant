@@ -1,0 +1,27 @@
+# Render Blueprint – deploy at https://dashboard.render.com/blueprints
+# Docs: https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: enterprise-knowledge-assistant
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free                     # Render free tier
+    healthCheckPath: /health
+    autoDeploy: true               # redeploys on every git push to main
+
+    envVars:
+      # ── Required: add your Groq key in Render dashboard ──────────────────
+      - key: GROQ_API_KEY
+        sync: false                # set manually in Render UI (never commit keys)
+
+      # ── Required: generate a strong random secret ─────────────────────────
+      - key: JWT_SECRET
+        generateValue: true        # Render auto-generates a secure value
+
+      # ── Optional: override Groq model ─────────────────────────────────────
+      - key: GROQ_MODEL
+        value: llama-3.1-8b-instant
+
+      # ── Audit log path writable on Render ─────────────────────────────────
+      - key: AUDIT_PATH
+        value: /tmp/audit.jsonl

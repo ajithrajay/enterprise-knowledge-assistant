@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Northwind Knowledge Assistant</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ── tokens ─────────────────────────────────────────────────── */
+:root{
+  --bg:#0f1117;--surface:#181c27;--raised:#1e2334;--border:#2a2f45;
+  --ink:#e8eaf0;--mute:#7b82a0;--faint:#3a4060;
+  --blue:#5b8ef0;--blue-dim:#1c2d52;--blue-text:#a8c0fa;
+  --green:#4eca8b;--green-dim:#132e22;
+  --red:#f06060;--red-dim:#2e1212;
+  --amber:#f0b060;--amber-dim:#2e2012;
+  --role-intern:#7b82a0;--role-employee:#5b8ef0;
+  --role-manager:#9b72f0;--role-hr:#4eca8b;
+  --radius:10px;--gap:14px;
+}
+@media(prefers-color-scheme:light){
+  :root{
+    --bg:#f0f2f7;--surface:#fff;--raised:#f7f8fc;--border:#dde0eb;
+    --ink:#1a1e30;--mute:#6b7290;--faint:#dde0eb;
+    --blue:#2c5fe0;--blue-dim:#e6ecff;--blue-text:#2c5fe0;
+    --green:#1a8a55;--green-dim:#e0f5eb;
+    --red:#c03030;--red-dim:#fde8e8;
+    --amber:#b06010;--amber-dim:#fef3e0;
+  }
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;font:14px/1.55 "Inter",system-ui,sans-serif;background:var(--bg);color:var(--ink)}
+
+/* ── shell ──────────────────────────────────────────────────── */
+#app{display:grid;grid-template-rows:56px 1fr;height:100vh}
+#topbar{
+  display:flex;align-items:center;gap:12px;padding:0 20px;
+  background:var(--surface);border-bottom:1px solid var(--border);
+  position:sticky;top:0;z-index:10;
+}
+#topbar h1{font-size:15px;font-weight:600;letter-spacing:-.2px;white-space:nowrap}
+#topbar h1 span{color:var(--blue)}
+.spacer{flex:1}
+#role-badge{
+  display:flex;align-items:center;gap:6px;padding:4px 10px;
+  background:var(--raised);border:1px solid var(--border);border-radius:99px;font-size:12px;
+}
+#role-badge .dot{width:7px;height:7px;border-radius:50%;background:var(--role-employee)}
+#role-badge.intern .dot{background:var(--role-intern)}
+#role-badge.employee .dot{background:var(--role-employee)}
+#role-badge.manager .dot{background:var(--role-manager)}
+#role-badge.hr_admin .dot{background:var(--role-hr)}
+#voice-toggle{
+  display:flex;align-items:center;gap:5px;padding:5px 10px;font-size:12px;
+  background:var(--raised);border:1px solid var(--border);border-radius:6px;cursor:pointer;
+  color:var(--mute);
+}
+#voice-toggle.on{background:var(--blue-dim);border-color:var(--blue);color:var(--blue-text)}
+
+/* ── columns ─────────────────────────────────────────────────── */
+#cols{display:grid;grid-template-columns:1fr 320px;min-height:0;overflow:hidden}
+@media(max-width:800px){#cols{grid-template-columns:1fr}#sidebar{display:none}}
+
+/* ── chat column ─────────────────────────────────────────────── */
+#chat-col{display:flex;flex-direction:column;min-height:0}
+#messages{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:12px;scroll-behavior:smooth}
+#messages::-webkit-scrollbar{width:5px}
+#messages::-webkit-scrollbar-thumb{background:var(--faint);border-radius:99px}
+
+/* empty state */
+#empty{margin:auto;text-align:center;max-width:360px;padding:20px}
+#empty svg{width:48px;opacity:.3;margin-bottom:16px}
+#empty h2{font-size:16px;font-weight:600;margin-bottom:6px}
+#empty p{color:var(--mute);font-size:13px;margin-bottom:18px}
+.pills{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+.pill{
+  background:var(--raised);border:1px solid var(--border);border-radius:99px;
+  padding:6px 12px;font-size:12px;cursor:pointer;color:var(--mute);
+  transition:border-color .15s,color .15s;
+}
+.pill:hover{border-color:var(--blue);color:var(--ink)}
+
+/* message bubbles */
+.msg-row{display:flex;align-items:flex-end;gap:8px}
+.msg-row.user{flex-direction:row-reverse}
+.avatar{
+  width:28px;height:28px;border-radius:50%;flex-shrink:0;
+  display:grid;place-items:center;font-size:11px;font-weight:600;
+}
+.avatar.bot{background:var(--blue-dim);color:var(--blue-text)}
+.avatar.user{background:var(--blue);color:#fff}
+.bubble{
+  max-width:72%;padding:10px 14px;border-radius:var(--radius);
+  line-height:1.55;font-size:13.5px;white-space:pre-wrap;word-break:break-word;
+}
+.bubble.user{background:var(--blue);color:#fff;border-bottom-right-radius:3px}
+.bubble.bot{background:var(--surface);border:1px solid var(--border);border-bottom-left-radius:3px}
+.bubble.bot.refused{background:var(--red-dim);border-color:var(--red);color:var(--red)}
+.bubble.thinking{color:var(--mute);font-style:italic}
+
+.meta-row{display:flex;gap:8px;align-items:center;margin-top:5px;padding-left:36px;flex-wrap:wrap}
+.msg-row.user .meta-row{justify-content:flex-end;padding-left:0;padding-right:36px}
+.badge{
+  font-size:11px;padding:2px 8px;border-radius:99px;cursor:default;
+}
+.badge.src{background:var(--blue-dim);color:var(--blue-text);cursor:pointer;border:1px solid transparent}
+.badge.src:hover{border-color:var(--blue)}
+.badge.ms{background:var(--raised);color:var(--mute);border:1px solid var(--border)}
+.badge.conf{background:var(--green-dim);color:var(--green)}
+.badge.refused{background:var(--red-dim);color:var(--red)}
+.badge.cached{background:var(--amber-dim);color:var(--amber)}
+.ticket-btn{
+  display:inline-flex;align-items:center;gap:5px;margin-top:6px;
+  padding:5px 12px;border-radius:6px;border:1px solid var(--red);
+  background:none;color:var(--red);font-size:12px;cursor:pointer;font:inherit;
+}
+.ticket-btn:hover{background:var(--red-dim)}
+
+/* input bar */
+#input-bar{
+  padding:12px 16px;background:var(--surface);border-top:1px solid var(--border);
+  display:flex;gap:10px;align-items:center;
+}
+#q{
+  flex:1;background:var(--raised);border:1px solid var(--border);border-radius:9px;
+  padding:10px 14px;color:var(--ink);font:inherit;font-size:13.5px;resize:none;
+  transition:border-color .15s;height:42px;line-height:1.4;
+}
+#q:focus{outline:none;border-color:var(--blue)}
+#mic-btn,#send-btn{
+  width:42px;height:42px;border-radius:9px;border:1px solid var(--border);
+  background:var(--raised);cursor:pointer;display:grid;place-items:center;flex-shrink:0;
+  color:var(--mute);transition:background .15s,border-color .15s,color .15s;
+}
+#mic-btn:hover,#send-btn:hover{border-color:var(--blue);color:var(--blue)}
+#send-btn{background:var(--blue);border-color:var(--blue);color:#fff}
+#send-btn:hover{background:#4a7de0}
+#mic-btn.listening{background:var(--red);border-color:var(--red);color:#fff;animation:pulse 1.2s ease-out infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(240,96,96,.5)}70%{box-shadow:0 0 0 8px rgba(240,96,96,0)}100%{box-shadow:0 0 0 0 rgba(240,96,96,0)}}
+@media(prefers-reduced-motion:reduce){#mic-btn.listening{animation:none}}
+
+/* ── sidebar ─────────────────────────────────────────────────── */
+#sidebar{
+  border-left:1px solid var(--border);background:var(--surface);
+  overflow-y:auto;display:flex;flex-direction:column;gap:0;
+}
+.panel{padding:16px;border-bottom:1px solid var(--border)}
+.panel h3{font-size:12px;font-weight:600;color:var(--mute);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px}
+
+/* login panel */
+#login-panel{padding:24px;display:flex;flex-direction:column;gap:10px}
+#login-panel h2{font-size:15px;font-weight:600;margin-bottom:4px}
+.field{display:flex;flex-direction:column;gap:4px}
+.field label{font-size:12px;color:var(--mute)}
+.field input,.field select{
+  background:var(--raised);border:1px solid var(--border);border-radius:6px;
+  padding:8px 10px;color:var(--ink);font:inherit;font-size:13px;
+}
+.field input:focus,.field select:focus{outline:none;border-color:var(--blue)}
+.login-btn{
+  background:var(--blue);color:#fff;border:none;border-radius:6px;
+  padding:9px;font:inherit;font-weight:600;cursor:pointer;font-size:13px;
+}
+.login-btn:hover{background:#4a7de0}
+.err{font-size:12px;color:var(--red)}
+/* source card */
+.src-card{background:var(--raised);border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px;font-size:12px}
+.src-card .doc-id{font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--blue-text);margin-bottom:4px}
+.src-card .snippet{color:var(--mute);line-height:1.5;margin-bottom:4px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.src-card .score{color:var(--green)}
+
+/* stats */
+.stat{display:flex;justify-content:space-between;padding:4px 0;font-size:12px;border-bottom:1px solid var(--faint)}
+.stat:last-child{border:none}
+.stat .val{font-weight:600;font-family:"JetBrains Mono",monospace;color:var(--blue-text)}
+
+/* doc list */
+.doc-item{font-size:12px;padding:4px 0;border-bottom:1px solid var(--faint);display:flex;justify-content:space-between}
+.doc-item:last-child{border:none}
+.doc-item .role-tag{font-size:10px;padding:1px 6px;border-radius:99px;background:var(--blue-dim);color:var(--blue-text)}
+
+/* ingest form */
+.ingest-section textarea,.ingest-section input,.ingest-section select{
+  width:100%;background:var(--raised);border:1px solid var(--border);border-radius:5px;
+  padding:6px 8px;color:var(--ink);font:inherit;font-size:12px;margin-bottom:6px;
+}
+.ingest-section textarea{height:70px;resize:vertical}
+.ingest-section button{
+  width:100%;padding:7px;background:var(--blue);color:#fff;border:none;
+  border-radius:6px;font:inherit;font-size:12px;font-weight:600;cursor:pointer;
+}
+.ingest-section .tabs{display:flex;gap:4px;margin-bottom:8px}
+.ingest-section .tab{
+  flex:1;padding:5px;font:inherit;font-size:12px;border:1px solid var(--border);
+  background:var(--raised);color:var(--mute);border-radius:5px;cursor:pointer;
+}
+.ingest-section .tab.active{background:var(--blue-dim);border-color:var(--blue);color:var(--blue-text)}
+
+/* scrollbar in sidebar */
+#sidebar::-webkit-scrollbar{width:4px}
+#sidebar::-webkit-scrollbar-thumb{background:var(--faint);border-radius:99px}
+</style>
+</head>
+<body>
+<div id="app">
+
+<!-- topbar -->
+<div id="topbar">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8v6M8 11h6"/></svg>
+  <h1>Northwind <span>Knowledge</span></h1>
+  <div class="spacer"></div>
+  <button id="voice-toggle" onclick="toggleVoice()" title="Read answers aloud">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+    Voice off
+  </button>
+  <div id="role-badge" class="employee">
+    <div class="dot"></div>
+    <span id="role-label">employee</span>
+  </div>
+</div>
+
+<!-- columns -->
+<div id="cols">
+
+  <!-- chat -->
+  <div id="chat-col">
+    <div id="messages" aria-live="polite">
+      <div id="empty">
+        <svg viewBox="0 0 24 24" fill="none" stroke="var(--ink)" stroke-width="1.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <h2>Ask your company knowledge base</h2>
+        <p>Answers come only from documents your role can access. Every answer shows its source.</p>
+        <div class="pills" id="suggestions"></div>
+      </div>
+    </div>
+    <div id="input-bar">
+      <button id="mic-btn" title="Hold to speak" onclick="toggleMic()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+      </button>
+      <textarea id="q" placeholder="Ask about leave, travel, contracts or IT…" rows="1"
+        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMsg()}"
+        oninput="autoGrow(this)"></textarea>
+      <button id="send-btn" onclick="sendMsg()" title="Send">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- sidebar -->
+  <div id="sidebar">
+
+    <!-- login -->
+    <div id="login-panel" class="panel">
+      <h2>Sign in</h2>
+      <p style="font-size:12px;color:var(--mute);margin-bottom:8px">Demo users: alice/alice123 (employee), bob/bob456 (manager), carol/carol789 (hr_admin), dave/dave000 (intern)</p>
+      <div class="field"><label>Username</label><input id="u" placeholder="alice" autocomplete="username"></div>
+      <div class="field"><label>Password</label><input id="p" type="password" placeholder="alice123" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"></div>
+      <button class="login-btn" onclick="doLogin()">Sign in</button>
+      <div id="login-err" class="err"></div>
+    </div>
+
+    <!-- sources -->
+    <div class="panel" id="sources-panel" style="display:none">
+      <h3>Sources</h3>
+      <div id="src-list"></div>
+    </div>
+
+    <!-- ingest (hr_admin only) -->
+    <div class="panel ingest-section" id="ingest-panel" style="display:none">
+      <h3>Add document</h3>
+      <div class="tabs">
+        <button class="tab active" onclick="switchTab('text',this)">Text</button>
+        <button class="tab" onclick="switchTab('pdf',this)">PDF</button>
+      </div>
+      <div id="tab-text">
+        <input id="ing-title" placeholder="Document title">
+        <input id="ing-version" placeholder="Version (e.g. v1)">
+        <select id="ing-role"><option value="intern">intern</option><option value="employee" selected>employee</option><option value="manager">manager</option><option value="hr_admin">hr_admin</option></select>
+        <textarea id="ing-text" placeholder="Paste document text here…"></textarea>
+        <button onclick="ingestText()">Add document</button>
+      </div>
+      <div id="tab-pdf" style="display:none">
+        <input id="pdf-title" placeholder="Document title">
+        <input id="pdf-version" placeholder="Version">
+        <select id="pdf-role"><option value="intern">intern</option><option value="employee" selected>employee</option><option value="manager">manager</option><option value="hr_admin">hr_admin</option></select>
+        <input type="file" id="pdf-file" accept=".pdf" style="background:none;border:none;padding:0;margin-bottom:8px">
+        <button onclick="ingestPDF()">Upload PDF</button>
+      </div>
+      <div id="ing-msg" style="font-size:12px;margin-top:4px"></div>
+    </div>
+
+    <!-- analytics -->
+    <div class="panel" id="analytics-panel" style="display:none">
+      <h3>Usage</h3>
+      <div id="stats-list"></div>
+    </div>
+
+    <!-- docs -->
+    <div class="panel" id="docs-panel" style="display:none">
+      <h3>Indexed documents</h3>
+      <div id="docs-list" style="font-size:12px;color:var(--mute)">—</div>
+    </div>
+
+  </div><!-- /sidebar -->
+</div><!-- /cols -->
+</div><!-- /app -->
+
+<script>
+/* ── state ─────────────────────────────────────────────────── */
+let TOKEN = null, ROLE = null, USER = null;
+let voiceOn = false, rec = null, isListening = false;
+const SUGGESTS = [
+  "How many leave days do I get?",
+  "Who approves a vendor contract above 5 lakh?",
+  "Chennai contractor laptop budget?",
+  "What is the hotel reimbursement cap?",
+  "When must appraisal reviews be completed?",
+];
+
+/* ── boot ──────────────────────────────────────────────────── */
+(function boot(){
+  SUGGESTS.forEach(t => {
+    const b = document.createElement("button");
+    b.className = "pill"; b.textContent = t;
+    b.onclick = () => sendQ(t);
+    document.getElementById("suggestions").append(b);
+  });
+  document.getElementById("u").focus();
+})();
+
+/* ── auth ──────────────────────────────────────────────────── */
+async function doLogin(){
+  const u = document.getElementById("u").value.trim();
+  const p = document.getElementById("p").value;
+  document.getElementById("login-err").textContent = "";
+  if(!u||!p){document.getElementById("login-err").textContent="Enter username and password.";return}
+  try{
+    const r = await fetch("/api/auth/token",{method:"POST",
+      headers:{"Content-Type":"application/x-www-form-urlencoded"},
+      body:`username=${encodeURIComponent(u)}&password=${encodeURIComponent(p)}`});
+    if(!r.ok){document.getElementById("login-err").textContent="Wrong username or password.";return}
+    const d = await r.json();
+    TOKEN = d.access_token; ROLE = d.role; USER = d.username;
+    document.getElementById("login-panel").style.display = "none";
+    const rb = document.getElementById("role-badge");
+    rb.className = ROLE; rb.querySelector("span").textContent = ROLE;
+    const badge = document.createElement("span");
+    badge.style.cssText = "font-size:12px;color:var(--mute)";
+    badge.textContent = USER;
+    document.getElementById("topbar").insertBefore(badge, document.getElementById("voice-toggle"));
+    document.getElementById("sources-panel").style.display = "block";
+    document.getElementById("analytics-panel").style.display = "block";
+    document.getElementById("docs-panel").style.display = "block";
+    if(ROLE === "hr_admin") document.getElementById("ingest-panel").style.display = "block";
+    loadAnalytics();
+  }catch(e){document.getElementById("login-err").textContent="Connection error.";}
+}
+
+/* ── voice ─────────────────────────────────────────────────── */
+function toggleVoice(){
+  voiceOn = !voiceOn;
+  const btn = document.getElementById("voice-toggle");
+  btn.className = voiceOn ? "on" : "";
+  btn.innerHTML = voiceOn
+    ? `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg> Voice on`
+    : `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg> Voice off`;
+}
+
+function speak(text){
+  if(!voiceOn||!("speechSynthesis" in window))return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text.slice(0,400));
+  u.lang="en-IN"; speechSynthesis.speak(u);
+}
+
+const SR = window.SpeechRecognition||window.webkitSpeechRecognition;
+function toggleMic(){
+  if(!SR){alert("Voice input requires Chrome or Edge.");return}
+  if(!rec){
+    rec = new SR(); rec.lang="en-IN"; rec.continuous=false; rec.interimResults=true;
+    rec.onresult=e=>{const t=[...e.results].map(r=>r[0].transcript).join("");
+      document.getElementById("q").value=t;
+      if(e.results[e.results.length-1].isFinal){stopMic();sendMsg();}};
+    rec.onend=()=>stopMic();
+  }
+  if(isListening){stopMic();}else{rec.start();isListening=true;document.getElementById("mic-btn").classList.add("listening");}
+}
+function stopMic(){if(rec&&isListening){try{rec.stop();}catch(e){}isListening=false;document.getElementById("mic-btn").classList.remove("listening");}}
+
+/* ── chat ──────────────────────────────────────────────────── */
+function autoGrow(el){el.style.height="42px";el.style.height=Math.min(el.scrollHeight,120)+"px"}
+
+async function sendMsg(){
+  const q = document.getElementById("q").value.trim();
+  if(!q)return;
+  document.getElementById("q").value="";
+  document.getElementById("q").style.height="42px";
+  sendQ(q);
+}
+
+async function sendQ(text){
+  if(!TOKEN){alert("Please sign in first.");return}
+  document.getElementById("empty")?.remove();
+  speechSynthesis.cancel();
+  addBubble("user",text,"NW".charAt(0));
+
+  const wait = addBubble("bot","Searching…","AI",true);
+  try{
+    const r = await fetch("/api/chat",{method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+TOKEN},
+      body:JSON.stringify({query:text})});
+    if(r.status===401){wait.remove();alert("Session expired. Please sign in again.");return}
+    if(!r.ok)throw new Error("Server error "+r.status);
+    const d = await r.json();
+    showAnswer(wait,d,text);
+    showSources(d.sources||[]);
+    loadAnalytics();
+    speak(d.answer);
+  }catch(e){
+    showBubbleText(wait,"Couldn't reach the assistant. Is the server running?");
+    wait.querySelector(".bubble").classList.add("refused");
+  }
+}
+
+function addBubble(who, text, initials, thinking=false){
+  const row = document.createElement("div"); row.className="msg-row "+who;
+  const av = document.createElement("div"); av.className="avatar "+who; av.textContent=initials;
+  const bub = document.createElement("div"); bub.className="bubble "+who+(thinking?" thinking":""); bub.textContent=text;
+  row.append(who==="user"?bub:av, who==="user"?av:bub);
+  document.getElementById("messages").append(row);
+  row.scrollIntoView({block:"nearest"});
+  return row;
+}
+
+function showBubbleText(row,text){row.querySelector(".bubble").textContent=text;}
+
+function showAnswer(row, d, query){
+  const bub = row.querySelector(".bubble");
+  bub.classList.remove("thinking");
+  bub.textContent = d.answer;
+  if(d.refused) bub.classList.add("refused");
+
+  const meta = document.createElement("div"); meta.className="meta-row";
+
+  const msb = document.createElement("span");
+  msb.className="badge ms"; msb.textContent=d.latency_ms+"ms";
+  meta.append(msb);
+
+  if(!d.refused && d.confidence!=null){
+    const cb = document.createElement("span");
+    cb.className="badge conf"; cb.textContent=Math.round(d.confidence*100)+"% conf";
+    meta.append(cb);
+  }
+  if(d.from_cache){
+    const ca = document.createElement("span"); ca.className="badge cached"; ca.textContent="cached"; meta.append(ca);
+  }
+  if(d.refused){
+    const rb = document.createElement("span"); rb.className="badge refused"; rb.textContent="no source"; meta.append(rb);
+    const tb = document.createElement("button"); tb.className="ticket-btn";
+    tb.innerHTML=`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg> Raise ticket`;
+    tb.onclick = ()=>raiseTicket(query);
+    bub.append(document.createElement("br"),tb);
+  }else{
+    (d.sources||[]).forEach(s=>{
+      const b=document.createElement("span"); b.className="badge src";
+      b.textContent=s.title+" "+s.version;
+      b.onclick=()=>showSources(d.sources||[]);
+      meta.append(b);
+    });
+  }
+  row.querySelector(".avatar").after(meta);
+}
+
+function showSources(list){
+  const el = document.getElementById("src-list");
+  if(!list.length){el.innerHTML='<p style="font-size:12px;color:var(--mute)">No sources for this answer.</p>';return}
+  el.innerHTML = list.map(s=>`
+    <div class="src-card">
+      <div class="doc-id">${s.doc_id}</div>
+      <div class="snippet">${s.snippet}</div>
+      <span class="score">match ${s.score}</span>
+    </div>`).join("");
+}
+
+/* ── ticket ─────────────────────────────────────────────────── */
+async function raiseTicket(summary){
+  const a = await api("POST","/api/ticket",{summary:"Unanswered: "+summary,confirmed:false});
+  if(!a)return;
+  if(!confirm(a.message))return;
+  const b = await api("POST","/api/ticket",{summary:"Unanswered: "+summary,confirmed:true});
+  if(b){
+    const row = addBubble("bot",`Ticket ${b.ticket_id} created. HR/IT will respond within 24 hours.`,"AI");
+    speak(row.querySelector(".bubble").textContent);
+  }
+}
+
+/* ── ingest ─────────────────────────────────────────────────── */
+function switchTab(name, btn){
+  document.querySelectorAll(".ingest-section .tab").forEach(t=>t.classList.remove("active"));
+  btn.classList.add("active");
+  document.getElementById("tab-text").style.display = name==="text"?"block":"none";
+  document.getElementById("tab-pdf").style.display  = name==="pdf" ?"block":"none";
+}
+async function ingestText(){
+  const msg = document.getElementById("ing-msg");
+  const body = {title:document.getElementById("ing-title").value.trim(),
+    version:document.getElementById("ing-version").value.trim()||"v1",
+    min_role:document.getElementById("ing-role").value,
+    text:document.getElementById("ing-text").value.trim()};
+  if(!body.title||!body.text){msg.textContent="Title and text required.";return}
+  msg.textContent="Ingesting…";
+  const r = await api("POST","/api/admin/ingest/text",body);
+  if(r) msg.textContent=`✓ Added as ${r.doc_id} (${r.chunks} chunks)`;
+  loadAnalytics();
+}
+async function ingestPDF(){
+  const msg = document.getElementById("ing-msg");
+  const file = document.getElementById("pdf-file").files[0];
+  if(!file){msg.textContent="Select a PDF.";return}
+  msg.textContent="Uploading…";
+  const fd = new FormData();
+  fd.append("title",document.getElementById("pdf-title").value.trim()||file.name.replace(".pdf",""));
+  fd.append("version",document.getElementById("pdf-version").value.trim()||"v1");
+  fd.append("min_role",document.getElementById("pdf-role").value);
+  fd.append("file",file);
+  const r = await fetch("/api/admin/ingest/pdf",{method:"POST",headers:{"Authorization":"Bearer "+TOKEN},body:fd});
+  const d = await r.json();
+  msg.textContent = r.ok ? `✓ Added as ${d.doc_id} (${d.chunks} chunks)` : `Error: ${JSON.stringify(d)}`;
+  loadAnalytics();
+}
+
+/* ── analytics ──────────────────────────────────────────────── */
+async function loadAnalytics(){
+  if(!TOKEN||ROLE==="intern")return;
+  const d = await api("GET","/api/analytics");
+  if(!d)return;
+  document.getElementById("stats-list").innerHTML=`
+    <div class="stat"><span>Questions</span><span class="val">${d.asked}</span></div>
+    <div class="stat"><span>Answered</span><span class="val">${d.answered}</span></div>
+    <div class="stat"><span>Declined</span><span class="val">${d.refused}</span></div>
+    <div class="stat"><span>Tickets</span><span class="val">${d.tickets}</span></div>
+    <div class="stat"><span>p50 latency</span><span class="val">${d.p50_ms}ms</span></div>
+    <div class="stat"><span>p95 latency</span><span class="val">${d.p95_ms}ms</span></div>
+    <div class="stat"><span>Docs indexed</span><span class="val">${d.collection_size}</span></div>
+    ${d.top_unanswered.length?`<div style="margin-top:8px;font-size:11px;color:var(--mute)">Top unanswered</div>`:""}
+    ${d.top_unanswered.slice(0,4).map(x=>`<div style="font-size:11px;padding:3px 0;border-bottom:1px solid var(--faint);color:var(--mute)">${x.q} <b style="color:var(--red)">&times;${x.count}</b></div>`).join("")}`;
+  document.getElementById("docs-list").innerHTML = d.collection_size
+    ? `<div class="stat"><span>Total chunks</span><span class="val">${d.collection_size}</span></div>`
+    : "No documents indexed yet.";
+}
+
+/* ── util ───────────────────────────────────────────────────── */
+async function api(method,path,body){
+  try{
+    const opts={method,headers:{Authorization:"Bearer "+TOKEN}};
+    if(body){opts.headers["Content-Type"]="application/json";opts.body=JSON.stringify(body)}
+    const r=await fetch(path,opts);
+    if(r.status===403){alert("Your role cannot perform this action.");return null}
+    return await r.json();
+  }catch(e){console.error(e);return null}
+}
+</script>
+</body>
+</html>
