@@ -60,6 +60,7 @@ html,body{height:100%;font:14px/1.55 "Inter",system-ui,sans-serif;background:var
 /* ── columns ─────────────────────────────────────────────────── */
 #cols{display:grid;grid-template-columns:1fr 320px;min-height:0;overflow:hidden}
 @media(max-width:800px){#cols{grid-template-columns:1fr}#sidebar{display:none}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
 
 /* ── chat column ─────────────────────────────────────────────── */
 #chat-col{display:flex;flex-direction:column;min-height:0}
@@ -308,6 +309,7 @@ html,body{height:100%;font:14px/1.55 "Inter",system-ui,sans-serif;background:var
 /* ── state ─────────────────────────────────────────────────── */
 let TOKEN = null, ROLE = null, USER = null;
 let voiceOn = false, rec = null, isListening = false;
+/* ── static starter questions (shown before first message) ─── */
 const SUGGESTS = [
   "How many leave days do I get?",
   "Who approves a vendor contract above 5 lakh?",
@@ -315,6 +317,108 @@ const SUGGESTS = [
   "What is the hotel reimbursement cap?",
   "When must appraisal reviews be completed?",
 ];
+
+/* ── contextual follow-up map ───────────────────────────────
+   Keys are keyword fragments matched against the last question.
+   Each entry gives 3 natural follow-ups a real employee would ask next.
+──────────────────────────────────────────────────────────── */
+const FOLLOWUPS = [
+  { match: ["leave","vacation","absence","sick","maternity","paternity","casual"],
+    qs: ["How do I apply for leave on HRMS?",
+         "How many leave days can I carry forward?",
+         "What happens to leave if I resign?"] },
+  { match: ["vendor","contract","procurement","purchase","po ","supplier"],
+    qs: ["What are the payment terms for vendors?",
+         "Do I need a purchase order for every procurement?",
+         "Who is on the approved vendor list?"] },
+  { match: ["laptop","hardware","device","equipment","monitor","phone"],
+    qs: ["What do I do if my laptop is lost or damaged?",
+         "How do I raise an IT support ticket?",
+         "What software comes pre-installed on my laptop?"] },
+  { match: ["travel","hotel","flight","reimbursement","expense","per diem"],
+    qs: ["How do I file an expense claim after travel?",
+         "What is the deadline for filing travel expenses?",
+         "Who approves international travel?"] },
+  { match: ["appraisal","performance","rating","increment","promotion","pip"],
+    qs: ["What is the increment percentage for a Rating 4?",
+         "When is the next appraisal cycle?",
+         "How does the promotion process work?"] },
+  { match: ["salary","compensation","band","ctc","pay","payroll"],
+    qs: ["When is salary credited every month?",
+         "What is the salary structure breakdown?",
+         "How is variable pay calculated?"] },
+  { match: ["resign","notice","separation","exit","last day","relieve"],
+    qs: ["When will I receive my F&F settlement?",
+         "How do I get my experience letter?",
+         "Can I buy out my notice period?"] },
+  { match: ["onboard","join","joining","day 1","probation","background"],
+    qs: ["What documents do I need to bring on Day 1?",
+         "How long is the probation period?",
+         "What access will I get on day one?"] },
+  { match: ["wfh","work from home","remote","hybrid","home office"],
+    qs: ["How many WFH days am I entitled to per week?",
+         "Can I claim internet allowance for WFH?",
+         "What are the IT requirements for working from home?"] },
+  { match: ["it","helpdesk","ticket","support","vpn","password","access"],
+    qs: ["What is the SLA for a P1 IT issue?",
+         "How do I reset my VPN?",
+         "What is the IT helpdesk phone number?"] },
+  { match: ["benefit","insurance","health","pf","gratuity","nps","mediclaim"],
+    qs: ["What is the health insurance coverage amount?",
+         "How do I withdraw my PF after leaving?",
+         "When am I eligible for gratuity?"] },
+  { match: ["intern","internship","ppo","stipend","certificate"],
+    qs: ["What is the intern stipend?",
+         "How do I get a pre-placement offer?",
+         "When is my internship completion certificate issued?"] },
+  { match: ["training","certification","course","l&d","learning","academy"],
+    qs: ["What is the annual L&D budget for my level?",
+         "Which certifications does Nexova reimburse?",
+         "How do I apply for conference sponsorship?"] },
+  { match: ["referral","refer","candidate","bonus"],
+    qs: ["How much is the referral bonus for an L4 role?",
+         "When is the referral bonus paid out?",
+         "How do I submit a referral on HRMS?"] },
+  { match: ["product","nexiq","nexflow","nexassist","platform"],
+    qs: ["What verticals does NexIQ target?",
+         "What is the pricing for NexAssist?",
+         "When is the next product release?"] },
+  { match: ["approval","approve","sign off","authority","who approves"],
+    qs: ["Who approves international travel?",
+         "Who signs off on a production deployment?",
+         "What is the hiring approval process for L5+ roles?"] },
+];
+
+/* Returns 3 contextual follow-up questions based on last query */
+function getFollowups(lastQuery) {
+  const q = lastQuery.toLowerCase();
+  const match = FOLLOWUPS.find(f => f.match.some(k => q.includes(k)));
+  return match ? match.qs : [
+    "What is the notice period policy?",
+    "Who approves domestic travel?",
+    "How do I raise an IT support ticket?",
+  ];
+}
+
+/* Renders a row of 3 follow-up pill buttons below a bot answer */
+function renderFollowups(afterRow, lastQuery) {
+  // Remove any existing follow-up row
+  document.querySelectorAll(".followup-row").forEach(el => el.remove());
+
+  const qs = getFollowups(lastQuery);
+  const wrap = document.createElement("div");
+  wrap.className = "followup-row";
+  wrap.style.cssText = "display:flex;flex-wrap:wrap;gap:8px;padding:4px 0 4px 36px;animation:fadeIn .3s ease";
+  qs.forEach(q => {
+    const b = document.createElement("button");
+    b.className = "pill";
+    b.textContent = q;
+    b.onclick = () => sendQ(q);
+    wrap.append(b);
+  });
+  afterRow.after(wrap);
+  wrap.scrollIntoView({block:"nearest"});
+}
 
 /* ── boot ──────────────────────────────────────────────────── */
 (function boot(){
@@ -348,8 +452,10 @@ async function doLogin(){
     badge.textContent = USER;
     document.getElementById("topbar").insertBefore(badge, document.getElementById("voice-toggle"));
     document.getElementById("sources-panel").style.display = "block";
-    document.getElementById("analytics-panel").style.display = "block";
-    document.getElementById("docs-panel").style.display = "block";
+    // analytics + docs only visible to manager and hr_admin
+    const canSeeAnalytics = (ROLE === "manager" || ROLE === "hr_admin");
+    document.getElementById("analytics-panel").style.display = canSeeAnalytics ? "block" : "none";
+    document.getElementById("docs-panel").style.display = canSeeAnalytics ? "block" : "none";
     if(ROLE === "hr_admin") document.getElementById("ingest-panel").style.display = "block";
     loadAnalytics();
   }catch(e){document.getElementById("login-err").textContent="Connection error.";}
@@ -415,6 +521,7 @@ async function sendQ(text){
     showSources(d.sources||[]);
     loadAnalytics();
     speak(d.answer);
+    renderFollowups(wait, text);
   }catch(e){
     showBubbleText(wait,"Couldn't reach the assistant. Is the server running?");
     wait.querySelector(".bubble").classList.add("refused");
@@ -530,7 +637,7 @@ async function ingestPDF(){
 
 /* ── analytics ──────────────────────────────────────────────── */
 async function loadAnalytics(){
-  if(!TOKEN||ROLE==="intern")return;
+  if(!TOKEN||ROLE==="intern"||ROLE==="employee")return;
   const d = await api("GET","/api/analytics");
   if(!d)return;
   document.getElementById("stats-list").innerHTML=`
