@@ -3,7 +3,7 @@ from app.services.pipeline import run
 def test_vendor_answered():
     r = run("Who approves vendor contracts above 5 lakh?", "employee", "tester")
     assert not r["refused"]
-    assert "PROC-VENDOR-v4" in [s["doc_id"] for s in r["sources"]]
+    assert "FIN-VENDOR-v4" in [s["doc_id"] for s in r["sources"]]
 
 def test_leave_answered():
     r = run("How many leave days do full-time employees get?", "employee", "tester")

@@ -18,6 +18,7 @@ log = logging.getLogger(__name__)
 SYSTEM = (
     "You are a precise enterprise knowledge assistant. "
     "Answer ONLY using the provided context passages. Be concise and factual. "
+    "If several passages seem to conflict, prefer the most specific one. "
     "Respond ONLY as valid JSON with NO markdown fences, exactly this shape: "
     '{"answer": "<your answer>", "citations": ["DOC-ID-1", "DOC-ID-2"]}. '
     "citations must be the exact document IDs from the context (e.g. HR-LEAVE-v5). "
@@ -26,6 +27,10 @@ SYSTEM = (
 )
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+# Used ONLY by the offline extractive fallback (no LLM available to say "not found").
+# With a real LLM, it decides relevance itself and this value is never consulted.
+MIN_EXTRACTIVE_SCORE = 0.25
 
 
 def _compute_confidence(answer: str, citations: list[str], ctx: list[dict]) -> float:
@@ -83,6 +88,12 @@ def _call_openai_compat(messages: list[dict]) -> dict:
 
 
 def _extractive(ctx: list[dict]) -> dict:
+    """Offline fallback: return the top chunk verbatim. Has no judgment of its own,
+    so it refuses when the best real (non-graph) hit is too weak."""
+    real = [c for c in ctx if c.get("version") != "live"]   # ignore graph chunks
+    if not real or max(c["score"] for c in real) < MIN_EXTRACTIVE_SCORE:
+        return {"answer": "I could not find this in the available documents.",
+                "citations": []}
     top = ctx[0]
     return {
         "answer":    top["text"],
